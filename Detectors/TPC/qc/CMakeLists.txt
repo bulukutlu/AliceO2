@@ -18,6 +18,7 @@ o2_add_library(TPCQC
                        src/DCSPTemperature.cxx
                        src/SACs.cxx
                        src/IDCsVsSACs.cxx
+                       src/GPUError.cxx
                PUBLIC_LINK_LIBRARIES O2::TPCBase
                                      O2::DataFormatsTPC
                                      O2::GPUO2Interface
@@ -33,7 +34,8 @@ o2_target_root_dictionary(TPCQC
                                   include/TPCQC/CalPadWrapper.h
                                   include/TPCQC/DCSPTemperature.h
                                   include/TPCQC/SACs.h
-                                  include/TPCQC/IDCsVsSACs.h)
+                                  include/TPCQC/IDCsVsSACs.h
+                                  include/TPCQC/GPUError.h)
 
 o2_add_test(PID
             COMPONENT_NAME tpc
@@ -64,6 +66,12 @@ o2_add_test(IDCsVsSACs
             COMPONENT_NAME tpc
             PUBLIC_LINK_LIBRARIES O2::TPCQC
             SOURCES test/test_IDCsVsSACs.cxx
+            LABELS tpc)
+
+o2_add_test(GPUError
+            COMPONENT_NAME tpc
+            PUBLIC_LINK_LIBRARIES O2::TPCQC
+            SOURCES test/test_GPUError.cxx
             LABELS tpc)
 
 o2_add_test_root_macro(macro/runPID.C
