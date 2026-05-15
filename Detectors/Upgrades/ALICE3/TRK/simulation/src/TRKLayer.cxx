@@ -136,31 +136,20 @@ TGeoVolume* TRKSegmentedLayer::createChip()
   chipVol->SetLineColor(kYellow);
 
   TGeoVolume* sensVol = createSensor();
-  TGeoCombiTrans* transSens = new TGeoCombiTrans();
-
   TGeoVolume* deadVol = createDeadzone();
-  TGeoCombiTrans* transDead = new TGeoCombiTrans();
-
   TGeoVolume* metalVol = createMetalStack();
+  TGeoCombiTrans* transSens = new TGeoCombiTrans();
+  TGeoCombiTrans* transDead = new TGeoCombiTrans();
   TGeoCombiTrans* transMetal = new TGeoCombiTrans();
 
-  if (!mIsFlipped) {
-    transSens->SetTranslation(-sDeadzoneWidth / 2, (mChipThickness - sSensorThickness) / 2, 0);
-    transDead->SetTranslation((sChipWidth - sDeadzoneWidth) / 2, (mChipThickness - sSensorThickness) / 2, 0);
-    transMetal->SetTranslation(0, -sSensorThickness / 2, 0);
-  } else {
-    transSens->SetTranslation(-sDeadzoneWidth / 2, -(mChipThickness - sSensorThickness) / 2, 0);
-    transDead->SetTranslation((sChipWidth - sDeadzoneWidth) / 2, -(mChipThickness - sSensorThickness) / 2, 0);
-    transMetal->SetTranslation(0, sSensorThickness / 2, 0);
-  }
+  const double sensY = mIsFlipped ? -(mChipThickness - sSensorThickness) / 2 : (mChipThickness - sSensorThickness) / 2;
+  const double metalY = mIsFlipped ? sSensorThickness / 2 : -sSensorThickness / 2;
+  transSens->SetTranslation(-sDeadzoneWidth / 2, sensY, 0);
+  transDead->SetTranslation((sChipWidth - sDeadzoneWidth) / 2, sensY, 0);
+  transMetal->SetTranslation(0, metalY, 0);
 
-  LOGP(debug, "Inserting {} in {} ", sensVol->GetName(), chipVol->GetName());
   chipVol->AddNode(sensVol, 1, transSens);
-
-  LOGP(debug, "Inserting {} in {} ", deadVol->GetName(), chipVol->GetName());
   chipVol->AddNode(deadVol, 1, transDead);
-
-  LOGP(debug, "Inserting {} in {} ", metalVol->GetName(), chipVol->GetName());
   chipVol->AddNode(metalVol, 1, transMetal);
 
   return chipVol;
@@ -393,14 +382,12 @@ TGeoVolume* TRKOTLayer::createHalfStave()
   TGeoVolume* halfStaveVol = new TGeoVolume(halfStaveName.c_str(), halfStave, medSi);
   halfStaveVol->SetLineColor(kYellow);
 
-  int nModulesPerHalfBarrel = mNumberOfModules / 2; // assuming mNumberOfModules is always even, which should be the case given the current specifications
+  int nModulesPerHalfBarrel = mNumberOfModules / 2;
   for (int iModule = 0; iModule < nModulesPerHalfBarrel; iModule++) {
-    TGeoVolume* moduleVol = createModule();
     double zPos = -0.5 * nModulesPerHalfBarrel * sModuleLength + (iModule + 0.5) * sModuleLength;
     TGeoCombiTrans* trans = new TGeoCombiTrans();
     trans->SetTranslation(0, 0, zPos);
-    LOGP(debug, "Inserting {} in {} ", moduleVol->GetName(), halfStaveVol->GetName());
-    halfStaveVol->AddNode(moduleVol, iModule, trans);
+    halfStaveVol->AddNode(createModule(), iModule, trans);
   }
 
   return halfStaveVol;
@@ -411,81 +398,338 @@ TGeoVolume* TRKOTLayer::createStave()
   std::string staveName = GeometryTGeo::getTRKStavePattern() + std::to_string(mLayerNumber);
   TGeoVolume* staveVol = new TGeoVolumeAssembly(staveName.c_str());
 
-  TGeoVolume* halfStaveVolLeft = createHalfStave();
   TGeoCombiTrans* transLeft = new TGeoCombiTrans();
   transLeft->SetTranslation(-(sHalfStaveWidth - sInStaveOverlap) / 2, 0, 0);
-  LOGP(debug, "Inserting {} in {} ", halfStaveVolLeft->GetName(), staveVol->GetName());
-  staveVol->AddNode(halfStaveVolLeft, 0, transLeft);
+  staveVol->AddNode(createHalfStave(), 0, transLeft);
 
-  TGeoVolume* halfStaveVolRight = createHalfStave();
   TGeoCombiTrans* transRight = new TGeoCombiTrans();
   transRight->SetTranslation((sHalfStaveWidth - sInStaveOverlap) / 2, 0.2, 0);
-  LOGP(debug, "Inserting {} in {} ", halfStaveVolRight->GetName(), staveVol->GetName());
-  staveVol->AddNode(halfStaveVolRight, 1, transRight);
+  staveVol->AddNode(createHalfStave(), 1, transRight);
 
   return staveVol;
 }
 
 void TRKOTLayer::createLayer(TGeoVolume* motherVolume)
 {
-  // Retrieve exact bounding boundaries automatically inherited from TRKSegmentedLayer
   auto [rMin, rMax] = getBoundingRadii(sStaveWidth);
 
   TGeoMedium* medAir = gGeoManager->GetMedium("TRK_AIR$");
-  // TGeoTube* layer = new TGeoTube(mInnerRadius - 0.333 * sLogicalVolumeThickness, mInnerRadius + 0.667 * sLogicalVolumeThickness, mLength / 2);
   TGeoTube* layer = new TGeoTube(rMin, rMax, (mLength + sGapBetweenOuterTrackerBarrelHalves) / 2);
   TGeoVolume* layerVol = new TGeoVolume(mLayerName.c_str(), layer, medAir);
   layerVol->SetLineColor(kYellow);
 
-  // Compute the number of staves
   int nStavesHalfBarrel = (int)std::ceil(mInnerRadius * 2 * TMath::Pi() / sStaveWidth);
-  nStavesHalfBarrel += nStavesHalfBarrel % 2; // Require an even number of staves
+  nStavesHalfBarrel += nStavesHalfBarrel % 2;
 
-  // Nominal average radius used as the placement barycenter for all staves
   const double avgRadius = 0.5 * (mInnerRadius + mOuterRadius);
-
-  // Compute the size of the overlap region
-  double theta = 2. * TMath::Pi() / nStavesHalfBarrel;
-  double theta1 = std::atan(sStaveWidth / 2 / mInnerRadius);
-  double st = std::sin(theta);
-  double ct = std::cos(theta);
-  double theta2 = std::atan((mInnerRadius * st - sStaveWidth / 2 * ct) / (mInnerRadius * ct + sStaveWidth / 2 * st));
-  double overlap = (theta1 - theta2) * mInnerRadius;
-  LOGP(info, "Creating a layer with two half barrels, each with {} staves and {} mm overlap", nStavesHalfBarrel, overlap * 10);
-
-  float lengthHalfBarrel = mLength / 2;
-  int nStaves = nStavesHalfBarrel * 2; // since we now have two half-barrels (separated by a small gap), we double the number of staves
+  const double theta = 2. * TMath::Pi() / nStavesHalfBarrel;
+  const float lengthHalfBarrel = mLength / 2;
+  const int nStaves = nStavesHalfBarrel * 2;
+  LOGP(info, "Creating OT layer {} with two half-barrels of {} staves each", mLayerNumber, nStavesHalfBarrel);
 
   for (int iStave = 0; iStave < nStaves; iStave++) {
-    TGeoVolume* staveVol = createStave();
-    int whichHalfBarrel = iStave / nStavesHalfBarrel; // 0 for the first half (negative z), 1 for the second half (positive z)
-    TGeoCombiTrans* trans = new TGeoCombiTrans();
+    int whichHalfBarrel = iStave / nStavesHalfBarrel;
     double phi = theta * iStave;
-    double phiDeg = phi * TMath::RadToDeg();
-    // TGeoRotation* rot = new TGeoRotation("rot", phiDeg + 90 + mTiltAngle, 0, 0);
     TGeoRotation* rot = new TGeoRotation("rot");
     if (whichHalfBarrel == 1) {
-      rot->RotateY(180.); // degrees, rotate the second half barrel by 180 degrees around Y to achieve the correct staggering orientation
+      rot->RotateY(180.);
     }
-    rot->RotateZ(phiDeg + 90 + (whichHalfBarrel == 0 ? +1 : -1) * mTiltAngle); // phi in degrees, tilting depends on the half-barrel side
-    trans->SetRotation(rot);
-    // trans->SetTranslation(mInnerRadius * std::cos(phi), mInnerRadius * std::sin(phi), 0);
-    // trans->SetTranslation(avgRadius * std::cos(phi), avgRadius * std::sin(phi), 0);
+    rot->RotateZ(phi * TMath::RadToDeg() + 90 + (whichHalfBarrel == 0 ? +1 : -1) * mTiltAngle);
     double zPos = (whichHalfBarrel == 0 ? -1 : 1) * (0.5 * lengthHalfBarrel + sGapBetweenOuterTrackerBarrelHalves / 2);
+    TGeoCombiTrans* trans = new TGeoCombiTrans();
+    trans->SetRotation(rot);
     trans->SetTranslation(avgRadius * std::cos(phi), avgRadius * std::sin(phi), zPos);
-    LOGP(debug, "Inserting {} in {} ", staveVol->GetName(), layerVol->GetName());
-    layerVol->AddNode(staveVol, iStave, trans);
+    layerVol->AddNode(createStave(), iStave, trans);
   }
 
-  LOGP(debug, "Inserting {} in {} ", layerVol->GetName(), motherVolume->GetName());
   motherVolume->AddNode(layerVol, 1, nullptr);
 }
 
 std::pair<float, float> TRKOTLayer::getBoundingRadii(double staveWidth) const
 {
   auto [radiusMin, radiusMax] = TRKSegmentedLayer::getBoundingRadii(staveWidth);
-
   return {radiusMin - 0.201f, radiusMax};
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+TRKOTLayerRealistic::TRKOTLayerRealistic(int layerNumber, std::string layerName, float rInn, float tiltAngle, int numberOfStaves, int numberOfModules, float thickOrX2X0, MatBudgetParamMode mode)
+  : TRKSegmentedLayer(layerNumber, layerName, rInn, tiltAngle, numberOfStaves, numberOfModules, thickOrX2X0, mode)
+{
+  // The outermost OT layer (global ML::nLayers+2, R=80 cm) is flipped: cooling pipe on the inner side.
+  if (mLayerNumber == constants::ML::nLayers + 2) {
+    mIsFlipped = true;
+  }
+}
+
+TGeoVolume* TRKOTLayerRealistic::createChip()
+{
+  TGeoMedium* medSi = gGeoManager->GetMedium("TRK_SILICON$");
+  std::string chipName = GeometryTGeo::getTRKChipPattern() + std::to_string(mLayerNumber);
+  TGeoShape* chip = new TGeoBBox(sChipWidth / 2, constants::OT::sensorThickness / 2, sChipLength / 2);
+  TGeoVolume* chipVol = new TGeoVolume(chipName.c_str(), chip, medSi);
+  chipVol->SetLineColor(kYellow);
+
+  // Pure-silicon chip: active sensor and passive read-out edge tile the width.
+  chipVol->AddNode(createSensor(), 1, new TGeoTranslation(-sDeadzoneWidth / 2, 0, 0));
+  chipVol->AddNode(createDeadzone(), 1, new TGeoTranslation((sChipWidth - sDeadzoneWidth) / 2, 0, 0));
+  return chipVol;
+}
+
+TGeoVolume* TRKOTLayerRealistic::createFPC()
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_FPC$");
+  TGeoShape* shape = new TGeoBBox(constants::OT::fpc::width / 2, constants::OT::fpc::thickness / 2, constants::OT::fpc::length / 2);
+  TGeoVolume* vol = new TGeoVolume((GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber) + "_FPC").c_str(), shape, med);
+  vol->SetLineColor(kOrange);
+  return vol;
+}
+
+TGeoVolume* TRKOTLayerRealistic::createColdPlate()
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_CARBONFIBER$");
+  TGeoShape* shape = new TGeoBBox(constants::OT::coldPlate::width / 2, constants::OT::coldPlate::thickness / 2, constants::OT::coldPlate::length / 2);
+  TGeoVolume* vol = new TGeoVolume((GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber) + "_ColdPlate").c_str(), shape, med);
+  vol->SetLineColor(kGray + 2);
+  return vol;
+}
+
+TGeoVolume* TRKOTLayerRealistic::createCoolingPipe()
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_CARBONFIBER$");
+  const int nModulesPerRow = mNumberOfModules / 2;
+  const double rowHalfLen = (nModulesPerRow * constants::OT::fpc::length + (nModulesPerRow - 1) * constants::OT::interModuleGap) / 2;
+  TGeoShape* tube = new TGeoTube(constants::OT::coolingPipe::rInner, constants::OT::coolingPipe::rOuter, rowHalfLen);
+  TGeoVolume* vol = new TGeoVolume((GeometryTGeo::getTRKStavePattern() + std::to_string(mLayerNumber) + "_CoolingPipe").c_str(), tube, med);
+  vol->SetLineColor(kBlue + 2);
+  return vol;
+}
+
+void TRKOTLayerRealistic::addConnector(TGeoVolume* moduleVol, double rMid)
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_LCPCU$");
+  std::string name = GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber) + "_Connector";
+  TGeoShape* shape = new TGeoBBox(constants::OT::connector::width / 2, constants::OT::connector::thickness / 2, constants::OT::connector::length / 2);
+  TGeoVolume* vol = new TGeoVolume(name.c_str(), shape, med);
+  vol->SetLineColor(kBlue);
+
+  // Single ZIF connector, centred in phi and inset from the module short edge in z.
+  const double z = constants::OT::fpc::length / 2 - constants::OT::connectorZDepth;
+  moduleVol->AddNode(vol, 0, new TGeoTranslation(0, rMid, z));
+}
+
+void TRKOTLayerRealistic::addCapacitors(TGeoVolume* moduleVol, double rMid)
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_BATIO3$");
+  std::string name = GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber) + "_Cap";
+  TGeoShape* shape = new TGeoBBox(constants::OT::capacitor::width / 2, constants::OT::capacitor::thickness / 2, constants::OT::capacitor::length / 2);
+  TGeoVolume* vol = new TGeoVolume(name.c_str(), shape, med);
+  vol->SetLineColor(kCyan);
+
+  const double pitchX = sChipWidth + constants::OT::interChipGap;
+  const double pitchZ = sChipLength + constants::OT::interChipGap;
+  const double chipX[2] = {-0.5 * pitchX, +0.5 * pitchX};
+  const double chipZ[4] = {-1.5 * pitchZ, -0.5 * pitchZ, +0.5 * pitchZ, +1.5 * pitchZ};
+  const double dX[5] = {-0.80, +0.80, -0.80, +0.80, 0.0}; // per chip: 4 corners + centre [cm]
+  const double dZ[5] = {-0.95, -0.95, +0.95, +0.95, 0.0};
+
+  // Skip capacitors that fall under the connector footprint (+1 mm clearance).
+  const double connZ = constants::OT::fpc::length / 2 - constants::OT::connectorZDepth;
+  const double skipX = constants::OT::connector::width / 2 + constants::OT::capacitor::width / 2 + 0.1;
+  const double skipZ = constants::OT::connector::length / 2 + constants::OT::capacitor::length / 2 + 0.1;
+
+  int capCopy = 0;
+  for (int iZ = 0; iZ < 4; iZ++) {
+    for (int iX = 0; iX < 2; iX++) {
+      for (int iCap = 0; iCap < constants::OT::capacitor::perChip; iCap++) {
+        const double x = chipX[iX] + dX[iCap];
+        const double z = chipZ[iZ] + dZ[iCap];
+        if (std::abs(x) < skipX && std::abs(z - connZ) < skipZ) {
+          continue;
+        }
+        moduleVol->AddNode(vol, capCopy++, new TGeoTranslation(x, rMid, z));
+      }
+    }
+  }
+}
+
+void TRKOTLayerRealistic::addBrackets(TGeoVolume* moduleVol, double rMid)
+{
+  TGeoMedium* med = gGeoManager->GetMedium("TRK_PEEK$");
+  std::string name = GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber) + "_Bracket";
+  TGeoShape* shape = new TGeoBBox(constants::OT::bracket::width / 2, constants::OT::bracket::thickness / 2, constants::OT::bracket::length / 2);
+  TGeoVolume* vol = new TGeoVolume(name.c_str(), shape, med);
+  vol->SetLineColor(kGreen + 2);
+
+  const double z = constants::OT::coldPlate::length / 2 - constants::OT::bracketZDepth;
+  moduleVol->AddNode(vol, 0, new TGeoTranslation(0, rMid, -z));
+  moduleVol->AddNode(vol, 1, new TGeoTranslation(0, rMid, +z));
+}
+
+TGeoVolume* TRKOTLayerRealistic::createModule()
+{
+  std::string modName = GeometryTGeo::getTRKModulePattern() + std::to_string(mLayerNumber);
+  TGeoVolume* moduleVol = new TGeoVolumeAssembly(modName.c_str());
+
+  // Flush component stack about the chip mid-plane (local r = 0).
+  const double chipHalf = constants::OT::sensorThickness / 2;
+  const double fpcMidY = -(chipHalf + constants::OT::fpc::thickness / 2);
+  const double coldPlateMidY = +(chipHalf + constants::OT::coldPlate::thickness / 2);
+  const double connMidY = -(chipHalf + constants::OT::fpc::thickness + constants::OT::connector::thickness / 2);
+  const double capMidY = -(chipHalf + constants::OT::fpc::thickness + constants::OT::capacitor::thickness / 2);
+  const double bracketMidY = +(chipHalf + constants::OT::coldPlate::thickness + constants::OT::bracket::thickness / 2);
+
+  // 8 chips: 2 phi columns x 4 z rows, on a uniform chip+gap pitch.
+  const double pitchX = sChipWidth + constants::OT::interChipGap;
+  const double pitchZ = sChipLength + constants::OT::interChipGap;
+  const double chipX[2] = {-0.5 * pitchX, +0.5 * pitchX};
+  const double chipZ[4] = {-1.5 * pitchZ, -0.5 * pitchZ, +0.5 * pitchZ, +1.5 * pitchZ};
+
+  moduleVol->AddNode(createColdPlate(), 0, new TGeoTranslation(0, coldPlateMidY, 0));
+
+  int chipCopy = 0;
+  for (int iZ = 0; iZ < 4; iZ++) {
+    for (int iX = 0; iX < 2; iX++) {
+      TGeoCombiTrans* trans = new TGeoCombiTrans();
+      trans->SetTranslation(chipX[iX], 0., chipZ[iZ]);
+      if (iX == 0) { // inner column rotated so its dead zone faces the outer module edge
+        TGeoRotation* rot = new TGeoRotation();
+        rot->RotateY(180.);
+        trans->SetRotation(rot);
+      }
+      moduleVol->AddNode(createChip(), chipCopy++, trans);
+    }
+  }
+
+  moduleVol->AddNode(createFPC(), 0, new TGeoTranslation(0, fpcMidY, 0));
+  addConnector(moduleVol, connMidY);
+  addCapacitors(moduleVol, capMidY);
+  addBrackets(moduleVol, bracketMidY);
+  return moduleVol;
+}
+
+TGeoVolume* TRKOTLayerRealistic::createHalfStave()
+{
+  std::string rowName = GeometryTGeo::getTRKHalfStavePattern() + std::to_string(mLayerNumber);
+  TGeoVolume* rowVol = new TGeoVolumeAssembly(rowName.c_str());
+
+  const int nModulesPerRow = mNumberOfModules / 2;
+  const double moduleLength = constants::OT::fpc::length;
+  const double step = moduleLength + constants::OT::interModuleGap;
+  const double rowHalfLen = (nModulesPerRow * moduleLength + (nModulesPerRow - 1) * constants::OT::interModuleGap) / 2;
+
+  for (int iModule = 0; iModule < nModulesPerRow; iModule++) {
+    double zPos = -rowHalfLen + moduleLength / 2 + iModule * step;
+    TGeoCombiTrans* trans = new TGeoCombiTrans();
+    trans->SetTranslation(0, 0, zPos);
+    rowVol->AddNode(createModule(), iModule, trans);
+  }
+
+  return rowVol;
+}
+
+TGeoVolume* TRKOTLayerRealistic::createStave()
+{
+  std::string staveName = GeometryTGeo::getTRKStavePattern() + std::to_string(mLayerNumber);
+  TGeoVolume* staveVol = new TGeoVolumeAssembly(staveName.c_str());
+
+  // Two rows overlapping in phi (active double-coverage) and offset 2 mm in r.
+  const double edgeDead = constants::moduleMLOT::gaps::outerEdgeLongSide + constants::moduleMLOT::chip::passiveEdgeReadOut;
+  const double inStaveOverlap = 2 * edgeDead + constants::OT::rowActiveOverlap;
+  const double rowOffset = constants::OT::fpc::width - inStaveOverlap;
+
+  staveVol->AddNode(createHalfStave(), 0, new TGeoTranslation(0, 0, 0));
+  TGeoCombiTrans* tRow1 = new TGeoCombiTrans();
+  tRow1->SetTranslation(rowOffset, 0.2, 0);
+  staveVol->AddNode(createHalfStave(), 1, tRow1);
+
+  TGeoCombiTrans* tPipe = new TGeoCombiTrans();
+  tPipe->SetTranslation(rowOffset / 2, constants::OT::coolingPipe::rLocalOffset, 0);
+  staveVol->AddNode(createCoolingPipe(), 0, tPipe);
+  return staveVol;
+}
+
+void TRKOTLayerRealistic::createLayer(TGeoVolume* motherVolume)
+{
+  const double edgeDead = constants::moduleMLOT::gaps::outerEdgeLongSide + constants::moduleMLOT::chip::passiveEdgeReadOut;
+  const double inStaveOverlap = 2 * edgeDead + constants::OT::rowActiveOverlap;
+  const double staveWidth = 2 * constants::OT::fpc::width - inStaveOverlap;
+
+  // One eta half-barrel = one row of modules, length set by the FPC.
+  const int nModulesPerRow = mNumberOfModules / 2;
+  const double lengthHalfBarrel = nModulesPerRow * constants::OT::fpc::length + (nModulesPerRow - 1) * constants::OT::interModuleGap;
+
+  auto [rMin, rMax] = getBoundingRadii(staveWidth);
+  TGeoMedium* medAir = gGeoManager->GetMedium("TRK_AIR$");
+  TGeoTube* layer = new TGeoTube(rMin, rMax, lengthHalfBarrel + constants::OT::barrelHalvesZGap / 2);
+  TGeoVolume* layerVol = new TGeoVolume(mLayerName.c_str(), layer, medAir);
+  layerVol->SetLineColor(kYellow);
+
+  const double avgRadius = 0.5 * (mInnerRadius + mOuterRadius);
+
+  // Stave count from the active width minus the desired neighbour overlap.
+  const double activeStaveWidth = staveWidth - 2 * edgeDead;
+  const double stavePitch = activeStaveWidth - constants::OT::rowActiveOverlap;
+  int nStavesHalfBarrel = (int)std::ceil(avgRadius * 2 * TMath::Pi() / stavePitch);
+  nStavesHalfBarrel += nStavesHalfBarrel % 2;
+
+  // Each z-half-barrel is built in two 180-deg azimuthal halves meeting at a gap
+  // (not an overlap); the two gaps are absorbed into a slightly larger internal
+  // overlap so the stave count is unchanged. The two half-barrels are cut on
+  // perpendicular planes (horizontal / vertical).
+  const int nHalf = nStavesHalfBarrel / 2;
+  const double accGap = constants::OT::halfBarrelChipGap + 2 * constants::moduleMLOT::chip::passiveEdgeReadOut;
+  const double thetaGap = (activeStaveWidth + accGap) / avgRadius;
+  const double thetaInt = (2. * TMath::Pi() - 2. * thetaGap) / (nStavesHalfBarrel - 2);
+  const double activeCenter = 0.5 * (constants::OT::fpc::width - inStaveOverlap);
+  const double overlap = activeStaveWidth - avgRadius * thetaInt;
+  LOGP(info, "Creating realistic OT layer {}: {} staves/half-barrel, internal overlap {} mm, boundary gap {} mm, flipped={}",
+       mLayerNumber, nStavesHalfBarrel, overlap * 10, accGap * 10, mIsFlipped);
+
+  const int nStaves = nStavesHalfBarrel * 2;
+
+  for (int iStave = 0; iStave < nStaves; iStave++) {
+    int whichHalfBarrel = iStave / nStavesHalfBarrel;
+    int sInHB = iStave % nStavesHalfBarrel;
+    int azHalf = sInHB / nHalf;
+    int sInAz = sInHB % nHalf;
+
+    // Place active centres so the boundary gaps land on the cut plane.
+    double phiCut = (whichHalfBarrel == 0) ? 0. : TMath::Pi() / 2;
+    double phiActive = phiCut + azHalf * TMath::Pi() + thetaGap / 2 + sInAz * thetaInt;
+    double sign = (whichHalfBarrel == 1 ? -1. : 1.) * (mIsFlipped ? -1. : 1.);
+    double phi = phiActive - sign * activeCenter / avgRadius;
+
+    TGeoRotation* rot = new TGeoRotation("rot");
+    rot->RotateX(180.); // cooling pipe faces the larger-R side (inner for the flipped layer); keeps local phi
+    if (whichHalfBarrel == 1) {
+      rot->RotateY(180.);
+    }
+    if (mIsFlipped) {
+      rot->RotateZ(180.);
+    }
+    rot->RotateZ(phi * TMath::RadToDeg() + 90 + (whichHalfBarrel == 0 ? +1 : -1) * mTiltAngle);
+
+    double zPos = (whichHalfBarrel == 0 ? -1 : 1) * (0.5 * lengthHalfBarrel + constants::OT::barrelHalvesZGap / 2);
+    TGeoCombiTrans* trans = new TGeoCombiTrans();
+    trans->SetRotation(rot);
+    trans->SetTranslation(avgRadius * std::cos(phi), avgRadius * std::sin(phi), zPos);
+    layerVol->AddNode(createStave(), iStave, trans);
+  }
+
+  motherVolume->AddNode(layerVol, 1, nullptr);
+}
+
+std::pair<float, float> TRKOTLayerRealistic::getBoundingRadii(double staveWidth) const
+{
+  auto [radiusMin, radiusMax] = TRKSegmentedLayer::getBoundingRadii(staveWidth);
+  const float connectorReach = constants::OT::sensorThickness / 2 + constants::OT::fpc::thickness + constants::OT::connector::thickness;
+  const float pipeOuterReach = constants::OT::coolingPipe::rLocalOffset + constants::OT::coolingPipe::rOuter;
+  const float margin = 0.1f;
+  if (!mIsFlipped) {
+    return {radiusMin - connectorReach - margin, radiusMax + pipeOuterReach + margin};
+  }
+  return {radiusMin - pipeOuterReach - margin, radiusMax + connectorReach + margin};
 }
 // ClassImp(TRKLayer);
 

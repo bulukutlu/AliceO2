@@ -71,7 +71,7 @@ namespace moduleMLOT /// same for ML and OT for the moment
 {                    /// TODO: account for different modules in case of changes
 namespace silicon
 {
-constexpr double thickness{100 * mu}; // thickness of the silicon (should be 10 um epitaxial layer + 90 um substrate)?
+constexpr double thickness{100 * mu}; // thickness of the silicon sensor (per OT spec §2.1; previously 50 um)
 } // namespace silicon
 namespace metalstack
 {
@@ -114,17 +114,66 @@ namespace OT
 {
 namespace halfstave
 {
-constexpr double width{moduleMLOT::width * 1}; // width of the half stave
-// constexpr double length{moduleMLOT::length * 20};                         // length of the halfstave
-constexpr double length{258 * cm};                                        // length of the halfstave, hardcoded to fit the implemented geometry
+constexpr double width{moduleMLOT::width * 1}; // width of the half stave (= one row width = FPC width = 52.2 mm)
+constexpr double length{258 * cm};             // legacy constant, not used directly in geometry assembly
 constexpr int nRows{static_cast<int>(width / moduleMLOT::chip::pitchX)};  // number of rows in the halfstave
 constexpr int nCols{static_cast<int>(length / moduleMLOT::chip::pitchZ)}; // number of columns in the halfstave
 } // namespace halfstave
 constexpr int nLayers{3};                                                 // number of layers in the OT
-constexpr double width{halfstave::width * 2};                             // width of the stave
+constexpr double width{halfstave::width * 2};                             // width of the stave (two rows)
 constexpr double length{halfstave::length};                               // length of the stave
 constexpr int nRows{static_cast<int>(width / moduleMLOT::chip::pitchX)};  // number of rows in the stave
 constexpr int nCols{static_cast<int>(length / moduleMLOT::chip::pitchZ)}; // number of columns in the stave
+constexpr int nModulesPerRow{11};                                         // modules along z in one row (spec §4.1)
+constexpr double interModuleGap{0.2 * mm};                                // z-gap between consecutive module FPCs (spec §4.2)
+
+// Detailed component dimensions (spec §2 and §7)
+namespace fpc
+{
+constexpr double length{116.8 * mm};    // z-extent (4 chips + gaps + edges)
+constexpr double width{52.2 * mm};     // phi-extent (2 chips + gap + edges)
+constexpr double thickness{0.200 * mm}; // r-extent; Kapton+Cu stack (spec §2.2)
+} // namespace fpc
+namespace coldPlate
+{
+constexpr double length{116.8 * mm};    // z-extent, same as FPC
+constexpr double width{47.2 * mm};     // phi-extent, narrower than FPC (chip active region only)
+constexpr double thickness{0.4 * mm};  // r-extent (spec §2.5)
+} // namespace coldPlate
+namespace connector
+{
+constexpr double width{25.0 * mm};     // phi-extent (long axis of ZIF connector)
+constexpr double length{10.0 * mm};     // z-extent
+constexpr double thickness{2.0 * mm};  // r-extent (spec §2.3)
+} // namespace connector
+namespace capacitor
+{
+constexpr double width{1.0 * mm};      // phi-extent
+constexpr double length{0.5 * mm};     // z-extent
+constexpr double thickness{0.3 * mm};  // r-extent (spec §2.4, unified size for 0201 and 0402)
+constexpr int perChip{5};              // 5 per chip → 40 per module
+} // namespace capacitor
+namespace bracket
+{
+constexpr double length{10.0 * mm};    // z-extent (spec §2.6)
+constexpr double width{5.0 * mm};      // phi-extent
+constexpr double thickness{8.0 * mm};  // r-extent, stand-off toward cooling pipe
+} // namespace bracket
+namespace coolingPipe
+{
+constexpr double rInner{0.4 * cm};       // inner radius: 4 mm
+constexpr double rOuter{0.5 * cm};       // outer radius: 5 mm (wall = 1 mm carbon fibre)
+constexpr double rLocalOffset{3.5 * cm}; // chip mid-plane → pipe axis, along local r
+} // namespace coolingPipe
+
+// Assembly parameters for the simplified-realistic OT (tunable)
+constexpr double sensorThickness{moduleMLOT::silicon::thickness}; // 100 um pure-silicon chip (no metal stack)
+constexpr double interChipGap{0.2 * mm};                          // gap between chips within a module
+constexpr double rowActiveOverlap{1.0 * mm};                      // active double-coverage between the two rows of a stave
+constexpr double halfBarrelChipGap{1.0 * mm};                     // chip-edge gap between the two azimuthal half-barrels
+constexpr double connectorZDepth{3.0 * cm};                       // connector centre, inset from the module short edge in z
+constexpr double bracketZDepth{3.0 * cm};                         // bracket centre, inset from the cold-plate short edge in z
+constexpr double barrelHalvesZGap{0.8 * cm};                      // z-gap between the two eta half-barrels
 } // namespace OT
 
 namespace apts /// parameters for the APTS response

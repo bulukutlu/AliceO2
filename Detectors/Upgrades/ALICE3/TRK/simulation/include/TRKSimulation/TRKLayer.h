@@ -13,7 +13,6 @@
 #define ALICEO2_TRK_LAYER_H
 
 #include "TRKBase/Specs.h"
-#include "TRKBase/TRKBaseParam.h"
 #include <TGeoManager.h>
 
 #include <Rtypes.h>
@@ -77,8 +76,8 @@ class TRKSegmentedLayer : public TRKCylindricalLayer
   TGeoVolume* createSensor() override;
   TGeoVolume* createDeadzone();
   TGeoVolume* createMetalStack() override;
-  TGeoVolume* createChip();
-  TGeoVolume* createModule();
+  virtual TGeoVolume* createChip();
+  virtual TGeoVolume* createModule();
   virtual TGeoVolume* createStave() = 0;
   void createLayer(TGeoVolume* motherVolume) override = 0;
 
@@ -88,7 +87,6 @@ class TRKSegmentedLayer : public TRKCylindricalLayer
   int mNumberOfStaves;
   bool mIsFlipped = false;
 
-  // Fixed parameters for the layer, to be set based on the specifications of the chip and module
   static constexpr double sChipWidth = constants::moduleMLOT::chip::width;
   static constexpr double sChipLength = constants::moduleMLOT::chip::length;
   static constexpr double sDeadzoneWidth = constants::moduleMLOT::chip::passiveEdgeReadOut;
@@ -99,10 +97,8 @@ class TRKSegmentedLayer : public TRKCylindricalLayer
   // TGeo objects outside logical volumes can cause errors
   static constexpr float sLogicalVolumeThickness = 1.3;
 
-  // For the segmented layers, because of tilting and staggering the bounding radii can be different
-  // from the inner radius and inner radius + thickness.
-  // This function calculates the bounding radii based on the geometry of the stave and the tilt angle,
-  // to ensure that the layer volume is large enough to contain all the staves without overlaps.
+  // Bounding radii accounting for tilt/staggering, so the layer volume contains
+  // all staves without extrusions.
   virtual std::pair<float, float> getBoundingRadii(double staveWidth) const;
 
   ClassDefOverride(TRKSegmentedLayer, 0);
@@ -130,6 +126,7 @@ class TRKMLLayer : public TRKSegmentedLayer
   ClassDefOverride(TRKMLLayer, 0);
 };
 
+// Original (simplified) OT barrel: solid-silicon modules, cylindrically paved.
 class TRKOTLayer : public TRKSegmentedLayer
 {
  public:
@@ -146,13 +143,44 @@ class TRKOTLayer : public TRKSegmentedLayer
 
  private:
   static constexpr double sHalfStaveWidth = constants::OT::halfstave::width;
-  static constexpr double sInStaveOverlap = constants::moduleMLOT::gaps::outerEdgeLongSide + constants::moduleMLOT::chip::passiveEdgeReadOut + 0.1; // 1.5mm outer-edge + 1mm deadzone + 1mm (true) overlap
+  static constexpr double sInStaveOverlap = constants::moduleMLOT::gaps::outerEdgeLongSide + constants::moduleMLOT::chip::passiveEdgeReadOut + 0.1;
   static constexpr double sStaveWidth = constants::OT::width - sInStaveOverlap;
 
-  // Override to account for the staggering offset present in OT layers
   std::pair<float, float> getBoundingRadii(double staveWidth) const override;
 
   ClassDefOverride(TRKOTLayer, 0);
+};
+
+// Simplified-realistic OT barrel: detailed module stack (FPC, cold plate, ZIF
+// connector, SMD capacitors, mounting brackets, cooling pipe), two-row staves
+// with active overlap, and a barrel paved in four parts (two eta half-barrels,
+// each split azimuthally into two halves cut on perpendicular planes).
+// All tunable dimensions live in constants::OT; everything derived is computed
+// in the source.
+class TRKOTLayerRealistic : public TRKSegmentedLayer
+{
+ public:
+  TRKOTLayerRealistic() = default;
+  TRKOTLayerRealistic(int layerNumber, std::string layerName, float rInn, float tiltAngle, int numberOfStaves, int numberOfModules, float thickOrX2X0, MatBudgetParamMode mode);
+  ~TRKOTLayerRealistic() override = default;
+
+  TGeoVolume* createChip() override;
+  TGeoVolume* createModule() override;
+  TGeoVolume* createStave() override;
+  TGeoVolume* createHalfStave();
+  void createLayer(TGeoVolume* motherVolume) override;
+
+ private:
+  TGeoVolume* createFPC();
+  TGeoVolume* createColdPlate();
+  TGeoVolume* createCoolingPipe();
+  void addConnector(TGeoVolume* moduleVol, double rMid);
+  void addCapacitors(TGeoVolume* moduleVol, double rMid);
+  void addBrackets(TGeoVolume* moduleVol, double rMid);
+
+  std::pair<float, float> getBoundingRadii(double staveWidth) const override;
+
+  ClassDefOverride(TRKOTLayerRealistic, 0);
 };
 
 } // namespace trk

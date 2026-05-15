@@ -126,6 +126,24 @@ void Detector::configMLOT()
       }
       break;
     }
+    case kSimplifiedRealistic: {
+      // Same ML as segmented; OT uses the detailed (realistic) barrel.
+      const std::vector<float> tiltAngles{11.2f, 11.9f, 11.4f, 0.f, 0.f, 0.f, 0.f, 0.f};
+      const std::vector<int> nStaves{10, 14, 18, 26, 38, 32, 42, 56};
+      const std::vector<int> nMods{11, 11, 11, 11, 11, 22, 22, 22};
+      const std::vector<float> stagOffsets{0.f, 0.f, 0.f, 1.17f, 0.89f};
+
+      LOGP(warning, "Loading simplified-realistic configuration for ALICE3 TRK");
+      for (int i{0}; i < constants::ML::nLayers + constants::OT::nLayers; ++i) {
+        std::string name = GeometryTGeo::getTRKLayerPattern() + std::to_string(i);
+        if (i < constants::ML::nLayers) {
+          mLayers.push_back(std::make_unique<TRKMLLayer>(i, name, rInn[i], stagOffsets[i], tiltAngles[i], nStaves[i], nMods[i], thick, MatBudgetParamMode::Thickness));
+        } else {
+          mLayers.push_back(std::make_unique<TRKOTLayerRealistic>(i, name, rInn[i], tiltAngles[i], nStaves[i], nMods[i], thick, MatBudgetParamMode::Thickness));
+        }
+      }
+      break;
+    }
     default:
       LOGP(fatal, "Unknown option {} for configMLOT", static_cast<int>(trkPars.layoutMLOT));
       break;
@@ -189,7 +207,8 @@ void Detector::configFromFile(std::string fileName)
         mLayers.push_back(std::make_unique<TRKCylindricalLayer>(layerCount, name, rInn, length, thick, matBudgetMode));
         break;
       }
-      case kSegmented: {
+      case kSegmented:
+      case kSimplifiedRealistic: {
         // Expected column mapping in the text file (separated by \t):
         // tmpBuff[0] = rInn
         // tmpBuff[1] = thick
@@ -231,7 +250,11 @@ void Detector::configFromFile(std::string fileName)
             matBudgetMode = static_cast<MatBudgetParamMode>(static_cast<int>(tmpBuff[5]));
           }
 
-          mLayers.push_back(std::make_unique<TRKOTLayer>(layerCount, name, rInn, tiltAngle, nStaves, nMods, thick, matBudgetMode));
+          if (trkPars.layoutMLOT == kSimplifiedRealistic) {
+            mLayers.push_back(std::make_unique<TRKOTLayerRealistic>(layerCount, name, rInn, tiltAngle, nStaves, nMods, thick, matBudgetMode));
+          } else {
+            mLayers.push_back(std::make_unique<TRKOTLayer>(layerCount, name, rInn, tiltAngle, nStaves, nMods, thick, matBudgetMode));
+          }
         }
         break;
       }
@@ -283,6 +306,13 @@ void Detector::createMaterials()
   float epsilCer = 1.0E-4;      // .10000E+01;
   float stminCer = 0.0;         // cm "Default value used"
 
+  // Shared tracking parameters for new passive materials (no sensitive regions)
+  float tmaxfdPas = 0.1;
+  float stemaxPas = 1.0;
+  float deemaxPas = 0.1;
+  float epsilPas = 1.0E-4;
+  float stminPas = 0.0;
+
   // AIR
   float aAir[4] = {12.0107, 14.0067, 15.9994, 39.948};
   float zAir[4] = {6., 7., 8., 18.};
@@ -293,11 +323,51 @@ void Detector::createMaterials()
   float aCf[2] = {12.0107, 1.00794};
   float zCf[2] = {6., 1.};
 
+  // FPC (Kapton+Cu effective mixture): X0 ~ 5 cm (spec §2.2)
+  // Tuned weight fractions give radiation length ~5 cm at this density
+  float aFpc[2] = {63.546f, 12.0107f}; // Cu, C (Kapton proxy)
+  float zFpc[2] = {29.f, 6.f};
+  float wFpc[2] = {0.40f, 0.60f};
+  float dFpc = 3.4f; // g/cm3, increased from pure Kapton to account for Cu layers
+
+  // ZIF connector (LCP+Cu effective mixture): X0 = 2.9 cm (spec §2.3)
+  float aLcpCu[2] = {63.546f, 12.0107f};
+  float zLcpCu[2] = {29.f, 6.f};
+  float wLcpCu[2] = {0.60f, 0.40f};
+  float dLcpCu = 5.5f; // g/cm3, higher Cu fraction → higher density and lower X0
+
+  // BaTiO3 ceramic for SMD capacitors: X0 = 1.9 cm (spec §2.4)
+  float aBaTiO3[3] = {137.327f, 47.867f, 15.9994f};
+  float zBaTiO3[3] = {56.f, 22.f, 8.f};
+  float wBaTiO3[3] = {0.5879f, 0.2054f, 0.2067f}; // mass fractions from stoichiometry BaTiO3
+  float dBaTiO3 = 6.0f; // g/cm3
+
   o2::base::Detector::Mixture(1, "AIR$", aAir, zAir, dAir, 4, wAir);
   o2::base::Detector::Medium(1, "AIR$", 1, 0, ifield, fieldm, tmaxfdAir, stemaxAir, deemaxAir, epsilAir, stminAir);
 
   o2::base::Detector::Material(3, "SILICON$", 0.28086E+02, 0.14000E+02, 0.23300E+01, 0.93600E+01, 0.99900E+03);
   o2::base::Detector::Medium(3, "SILICON$", 3, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
+
+  // Carbon fibre: density tuned so X0 = 27 cm (spec §2.5, §2.7)
+  // X0(graphite at 2.09 g/cm3) = 18.8 cm → scale rho: rho = 2.09 * 18.8/27 ≈ 1.45 g/cm3
+  o2::base::Detector::Material(4, "CARBONFIBER$", 12.0107f, 6.f, 1.45f, 27.0f, 999.f);
+  o2::base::Detector::Medium(4, "CARBONFIBER$", 4, 0, ifield, fieldm, tmaxfdPas, stemaxPas, deemaxPas, epsilPas, stminPas);
+
+  // FPC Kapton+Cu effective mixture (spec §2.2), X0 ~ 5 cm
+  o2::base::Detector::Mixture(5, "FPC$", aFpc, zFpc, dFpc, 2, wFpc);
+  o2::base::Detector::Medium(5, "FPC$", 5, 0, ifield, fieldm, tmaxfdPas, stemaxPas, deemaxPas, epsilPas, stminPas);
+
+  // ZIF connector LCP+Cu effective mixture (spec §2.3), X0 = 2.9 cm
+  o2::base::Detector::Mixture(6, "LCPCU$", aLcpCu, zLcpCu, dLcpCu, 2, wLcpCu);
+  o2::base::Detector::Medium(6, "LCPCU$", 6, 0, ifield, fieldm, tmaxfdPas, stemaxPas, deemaxPas, epsilPas, stminPas);
+
+  // BaTiO3 ceramic for SMD capacitors (spec §2.4), X0 = 1.9 cm
+  o2::base::Detector::Mixture(7, "BATIO3$", aBaTiO3, zBaTiO3, dBaTiO3, 3, wBaTiO3);
+  o2::base::Detector::Medium(7, "BATIO3$", 7, 0, ifield, fieldm, tmaxfdPas, stemaxPas, deemaxPas, epsilPas, stminPas);
+
+  // PEEK polymer for mounting brackets (spec §2.6): X0 ~ 20 cm, rho ~ 1.32 g/cm3
+  o2::base::Detector::Material(8, "PEEK$", 12.0107f, 6.f, 1.32f, 20.0f, 999.f);
+  o2::base::Detector::Medium(8, "PEEK$", 8, 0, ifield, fieldm, tmaxfdPas, stemaxPas, deemaxPas, epsilPas, stminPas);
 }
 
 void Detector::createGeometry()
