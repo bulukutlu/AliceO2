@@ -618,21 +618,29 @@ bool Detector::ProcessHits(FairVolume* vol)
     // Retrieve the indices with the volume path
     int stave(0), halfstave(0), mod(0), chip(0);
 
-    auto& trkPars = TRKBaseParam::Instance();
-
     if (subDetID == 1) {
-      if (trkPars.layoutMLOT == o2::trk::eMLOTLayout::kSegmented) {
-        fMC->CurrentVolOffID(1, chip);
-        fMC->CurrentVolOffID(2, mod);
+      // Resolve stave/half-stave/module/chip from the TGeo node path at the hit
+      // mid-point. This position-based lookup is robust for every MLOT layout: in
+      // particular the simplified-realistic OT builds its stave/half-stave/module as
+      // assembly volumes, for which fMC volume-offset copy numbers are not retrieved
+      // reliably (all read 0 -> every hit collapses onto the layer's first chip).
+      // PushPath/PopPath leave the stepping navigator untouched.
+      const TVector3 mid = (mTrackData.mPositionStart.Vect() + positionStop.Vect()) * 0.5;
+      gGeoManager->PushPath();
+      if (gGeoManager->FindNode(mid.X(), mid.Y(), mid.Z())) {
+        auto copyUp = [](int up) { TGeoNode* n = gGeoManager->GetMother(up); return n ? n->GetNumber() : 0; };
+        chip = copyUp(1); // sensor's parent chip
+        mod = copyUp(2);
         if (mGeometryTGeo->getNumberOfHalfStaves(layer) == 2) {
-          fMC->CurrentVolOffID(3, halfstave);
-          fMC->CurrentVolOffID(4, stave);
+          halfstave = copyUp(3);
+          stave = copyUp(4);
         } else if (mGeometryTGeo->getNumberOfHalfStaves(layer) == 1) {
-          fMC->CurrentVolOffID(3, stave);
+          stave = copyUp(3);
         } else {
           LOGP(fatal, "Wrong number of halfstaves for layer {}", layer);
         }
       }
+      gGeoManager->PopPath();
     } /// if VD, for the moment the volume is the "chipID" so no need to retrieve other elments
 
     unsigned short chipID = mGeometryTGeo->getChipIndex(subDetID, volume, layer, stave, halfstave, mod, chip);
