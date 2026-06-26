@@ -30,6 +30,7 @@ enum eVDLayout {
 enum eMLOTLayout {
   kCylindrical = 0,
   kSegmented,
+  kSimplifiedRealistic,
 };
 
 enum eSrvLayout {
